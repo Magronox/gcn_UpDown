@@ -96,11 +96,9 @@ function scd_w1!(Z_opt, A::SparseMatrixCSC, X::Matrix{Float64}, W1::Matrix{Float
             output += Pmat(W2,A,k,l)*Diagonal(vec(gcn(A,X,W1)[l,:].>0))*Mmat(H2,X,A,l,i)
         end
         J = Dmat(H3[k,:]) * output
-        temp = zeros(size(Z,2))
-        temp[Z_opt[k,:]] .= -1
         if(iszero(J)) continue
         end
-        W1[:,i] = W1[:,i]- α*(temp'*J)'
+        W1[:,i] = W1[:,i]- α*(-Z_opt[k,:]'*J)'
     end
     W1
 end
@@ -115,9 +113,7 @@ function scd_w2!(Z_opt, A::SparseMatrixCSC, X::Matrix{Float64}, W1::Matrix{Float
         k = rand(1:size(Z,1))
         output = zeros(size(H3,2),size(H2,2))
         output = Dmat(H3[k,:])*Mmat(H3,H2,A,k,i)
-        temp = zeros(size(Z,2))
-        temp[Z_opt[k,:]] .= -1
-        W2[:,i] = W2[:,i]- α*(temp'*output)'
+        W2[:,i] = W2[:,i]- α*(Z_opt[k,:]'*output)'
     end
     W2
 end
