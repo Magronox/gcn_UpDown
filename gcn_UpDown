@@ -1,0 +1,172 @@
+using LinearAlgebra, SparseArrays, Random
+
+
+
+function Relu(H::Union{Matrix,Vector})
+### Relu activation
+
+    return Int.(H.>0).*H
+end
+
+function LSM(H::Matrix)
+### Log SoftMax function
+### Each row of H gives us the output for a node
+
+    res = zeros(size(H))
+    for i in 1:size(H,1)
+        res[i,:]= log.(exp.(H[i,:])/sum(exp.(H[i,:])))
+    end
+    res
+end
+
+function gcn(A::SparseMatrixCSC, X::Matrix, W::Matrix)
+    ### simple gcn function
+    d = sum(A, dims = 2)
+    D = Diagonal(vec(d))
+    tild_A = D^(-1/2)*A*D^(-1/2)
+    return tild_A*X*W
+end
+
+function Dmat(hk::Vector{Float64})
+    ## Jacobian for LSM activation on the vector hk
+    s = sum(exp.(hk))
+    D = I(length(hk)) - (1/s)*repeat(exp.(hk)', outer = length(hk))
+    D
+
+end
+
+
+
+function Mmat( H_3::Matrix, H_2::Matrix, A::SparseMatrixCSC, i::Int64, j::Int64)
+    ##Jacobian of H3[k,:] = GCN(A,H2,W)[k,:] to W[:,j]
+
+    M = zeros(size(H_3,2), size(H_2,2))
+    degs = sum(A, dims= 2)
+    for l in 1:size(M,2)
+        M[j,l] = sum(H_2[rowvals(A)[nzrange(A,i)],l]./sqrt.(degs[i]*degs[rowvals(A)[nzrange(A,i)]]))
+    end
+    M
+
+end
+
+function Pmat(W_2::Matrix, A::SparseMatrixCSC, i::Int64, j::Int64)
+    ##H_3_i to H_2_j
+    degs = sum(A, dims = 2)
+    D = Diagonal(vec(sqrt.(1 ./degs)))
+    if j in rowvals(A)[nzrange(A,i)]
+        return sqrt(1/(degs[i]*degs[j]))*W_2'
+    else 
+        return zeros(size(W_2'))
+    end
+end
+
+
+function overall_function(A::SparseMatrixCSC, X::Matrix, W_1::Matrix, W_2::Matrix)
+    ## A is the adjacency Matrix for the graph
+    ## X is the input n X m matrix 
+    ## W_1 is the matrix for the weights in the first GCN block 
+    ## W_2 is the matrix for the wieghts in the second GCN block 
+        output = LSM(gcn(A,Relu(gcn(A,X,W_1)),W_2))
+        output
+end
+    
+
+function nll_loss(Z_opt:: Matrix,Z:: Matrix)
+    ## Note that each row of the input Z should be in the form of log probabilities
+       return -sum((Z[Z_opt]))
+end
+
+function nll_loss_k(Z_opt:: Matrix, Z:: Matrix, k::Int64)
+   ## Note that each row of the input Z should be in the form of log probabilities
+    return -Z[k,:][Z_opt[k,:]]
+end
+    
+
+
+function scd_w1!(Z_opt, A::SparseMatrixCSC, X::Matrix{Float64}, W1::Matrix{Float64}, W2::Matrix{Float64},α::Float64)
+    ### stochastic coordinate descent for the output of kth node(z_k) to ith column of W1
+    Z = overall_function(A,X,W1,W2)
+    H2 = gcn(A,X,W1)
+    H3 = gcn(A,Relu(gcn(A,X,W1)),W2)
+
+    for i in 1:size(W1,2)
+        k = rand(1:size(Z,1))
+        output = zeros(size(H3,2),size(X,2))
+        for l in rowvals(A)[nzrange(A,k)]
+            output += Pmat(W2,A,k,l)*Diagonal(vec(gcn(A,X,W1)[l,:].>0))*Mmat(H2,X,A,l,i)
+        end
+        J = Dmat(H3[k,:]) * output
+        temp = zeros(size(Z,2))
+        temp[Z_opt[k,:]] .= -1
+        if(iszero(J)) continue
+        end
+        W1[:,i] = W1[:,i]- α*(temp'*J)'
+    end
+    W1
+end
+
+function scd_w2!(Z_opt, A::SparseMatrixCSC, X::Matrix{Float64}, W1::Matrix{Float64}, W2::Matrix{Float64}, α::Float64)
+    ### stochastic coordinate descent for the output of kth node(z_k) to ith column of W1
+    Z = overall_function(A,X,W1,W2)
+    H2 = gcn(A,X,W1)
+    H3 = gcn(A,Relu(gcn(A,X,W1)),W2)
+    
+    for i in 1:size(W2,2)
+        k = rand(1:size(Z,1))
+        output = zeros(size(H3,2),size(H2,2))
+        output = Dmat(H3[k,:])*Mmat(H3,H2,A,k,i)
+        temp = zeros(size(Z,2))
+        temp[Z_opt[k,:]] .= -1
+        W2[:,i] = W2[:,i]- α*(temp'*output)'
+    end
+    W2
+end
+
+
+
+##### test:
+
+n = 10
+k = 10
+m = 6
+X = randn(n,k)
+W1 = randn(k,n)
+W2 = randn(n,m)
+
+A = sprand(Bool,n,n,0.6)
+A = triu(A)
+A = A + A'
+
+## Adding self-loop
+A[diagind(A)] .= 1
+
+
+
+Z_opt = zeros(Bool,n,m)
+ind = map(1:n) do i
+    x1 = i
+    y1 = rand(1:6)
+
+    CartesianIndex(x1, y1)
+end
+Z_opt[ind] .= 1
+W1=randn(10,5)
+W2 = randn(5,6)
+Z = overall_function(A,X,W1,W2)
+l1 = nll_loss(Z_opt,Z)
+
+niter = 30000
+idx = 1
+for i in 1:niter
+    W1 = scd_w1!(Z_opt,A,X,W1,W2,0.02)
+    W2 = scd_w2!(Z_opt,A,X,W1,W2,0.02)
+end
+Z = overall_function(A,X,W1,W2)
+l2 = nll_loss(Z_opt,Z)
+result = zeros(Bool,size(Z))
+for i in 1:size(Z,1)
+    result[i,findmax(Z[i,:])[2]] = 1
+end
+
+ncorrect = sum(result[Z_opt])
+correct_ratio = ncorrect/n
