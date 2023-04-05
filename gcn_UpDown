@@ -52,7 +52,6 @@ end
 function Pmat(W_2::Matrix, A::SparseMatrixCSC, i::Int64, j::Int64)
     ##H_3_i to H_2_j
     degs = sum(A, dims = 2)
-    D = Diagonal(vec(sqrt.(1 ./degs)))
     if j in rowvals(A)[nzrange(A,i)]
         return sqrt(1/(degs[i]*degs[j]))*W_2'
     else 
