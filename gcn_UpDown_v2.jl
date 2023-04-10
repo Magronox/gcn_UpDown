@@ -37,11 +37,6 @@ function Mmat(A::SparseMatrixCSC, H::Matrix, idx:: Int64, k::Int64)
     for j in 2:size(H,1)
         M = sparse_hcat(M,I(k)*sum(H[j,rowvals(A)[nzrange(A,idx)]]./sqrt.(degs[idx]*degs[rowvals(A)[nzrange(A,idx)]])) )
     end
-    for j in M
-        if isnan(j)
-            print("here",M,"\n")
-        end
-    end
     M
 end
 
@@ -58,11 +53,6 @@ function gd_W2!(Z_opt, A::SparseMatrixCSC, X::Matrix, Ws, α)
 
     end
     W2[:] -= α*temp[:]
-    #for j in W2
-    #    if(isnan(j))
-    #        print(temp,(I(k) - ones(k)*exp.(Z[:,n]')), Mmat(A,H2,n,k))
-    #    end
-    #end
     return W2
 end
 
