@@ -45,7 +45,7 @@ function Mmat(A::SparseMatrixCSC, H::Matrix, idx:: Int64, k::Int64)
     M
 end
 
-function gd_W2(Z_opt, A::SparseMatrixCSC, X::Matrix, Ws, α)
+function gd_W2!(Z_opt, A::SparseMatrixCSC, X::Matrix, Ws, α)
     W1, W2 = Ws
     Z = overall_function(A,X,Ws)
     H2 = Relu(gcn(A,X,W1))
@@ -66,7 +66,7 @@ function gd_W2(Z_opt, A::SparseMatrixCSC, X::Matrix, Ws, α)
     return W2
 end
 
-function gd_W1(Z_opt, A::SparseMatrixCSC, X::Matrix, Ws, α)
+function gd_W1!(Z_opt, A::SparseMatrixCSC, X::Matrix, Ws, α)
     W1, W2 = Ws
     H2 = gcn(A,X,W1)
     n = size(A,1)
