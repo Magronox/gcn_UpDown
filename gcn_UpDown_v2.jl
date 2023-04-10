@@ -31,11 +31,11 @@ function nll(Z_opt,Z)
     sum(-Z[Z_opt])
 end
 
-@inline function Mmat(A::SparseMatrixCSC, H::Matrix, idx:: Int64, k::Int64)
+function Mmat(A::SparseMatrixCSC, H::Matrix, idx:: Int64, k::Int64)
     degs = sum(A, dims = 2)
-    M = I(k)*sum(H[1,rowvals(A)[nzrange(A,idx)]]./sqrt.(degs[idx]*degs[rowvals(A)[nzrange(A,idx)]]))
+    M = sparse(I(k)*sum(H[1,rowvals(A)[nzrange(A,idx)]]./sqrt.(degs[idx]*degs[rowvals(A)[nzrange(A,idx)]])))
     for j in 2:size(H,1)
-        M = hcat(M,I(k)*sum(H[j,rowvals(A)[nzrange(A,idx)]]./sqrt.(degs[idx]*degs[rowvals(A)[nzrange(A,idx)]])) )
+        M = sparse_hcat(M,I(k)*sum(H[j,rowvals(A)[nzrange(A,idx)]]./sqrt.(degs[idx]*degs[rowvals(A)[nzrange(A,idx)]])) )
     end
     for j in M
         if isnan(j)
@@ -74,6 +74,7 @@ function gd_W1(Z_opt, A::SparseMatrixCSC, X::Matrix, Ws, α)
     k = size(W2,1)
     temp = zeros(1,l*size(X,1))
     degs = sum(A, dims = 2)
+    Z = overall_function(A,X,Ws)
     for i in 1:n
         temp2 = zeros(k,size(X,1)*l)
         for j in rowvals(A)[nzrange(A,i)]
