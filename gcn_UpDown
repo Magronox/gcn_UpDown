@@ -1,121 +1,95 @@
-using LinearAlgebra, SparseArrays, Random
+using SparseArrays, LinearAlgebra, Random
 
 
 
-function Relu(H::Union{Matrix,Vector})
-### Relu activation
 
-    return Int.(H.>0).*H
+  
+
+function lsm(x::Union{Vector{Float64},Matrix{Float64}})
+    log.(exp.(x)/sum(exp.(x)))
 end
 
-function LSM(H::Matrix)
-### Log SoftMax function
-### Each row of H gives us the output for a node
-
-    res = zeros(size(H))
-    for i in 1:size(H,1)
-        res[i,:]= log.(exp.(H[i,:])/sum(exp.(H[i,:])))
-    end
-    res
+function ReLU(x::Union{Matrix, Vector})
+    Int.(x.>0).*x
 end
 
-function gcn(A::SparseMatrixCSC, X::Matrix, W::Matrix)
-    ### simple gcn function
+function nll_loss(z_opt,z)
+    -z[z_opt]
+end
+
+### Not optimized simple versions:
+
+
+function gcn(A::SparseMatrixCSC, X::Matrix, idx::Int64, layer::Int64, activations, Ws... )
     d = sum(A, dims = 2)
-    D = Diagonal(vec(d))
-    tild_A = D^(-1/2)*A*D^(-1/2)
-    return tild_A*X*W
-end
-
-function Dmat(hk::Vector{Float64})
-    ## Jacobian for LSM activation on the vector hk
-    s = sum(exp.(hk))
-    D = I(length(hk)) - (1/s)*repeat(exp.(hk)', outer = length(hk))
-    D
-
-end
-
-
-
-function Mmat( H_3::Matrix, H_2::Matrix, A::SparseMatrixCSC, i::Int64, j::Int64)
-    ##Jacobian of H3[k,:] = GCN(A,H2,W)[k,:] to W[:,j]
-
-    M = zeros(size(H_3,2), size(H_2,2))
-    degs = sum(A, dims= 2)
-    for l in 1:size(M,2)
-        M[j,l] = sum(H_2[rowvals(A)[nzrange(A,i)],l]./sqrt.(degs[i]*degs[rowvals(A)[nzrange(A,i)]]))
-    end
-    M
-
-end
-
-function Pmat(W_2::Matrix, A::SparseMatrixCSC, i::Int64, j::Int64)
-    ##H_3_i to H_2_j
-    degs = sum(A, dims = 2)
-    if j in rowvals(A)[nzrange(A,i)]
-        return sqrt(1/(degs[i]*degs[j]))*W_2'
-    else 
-        return zeros(size(W_2'))
-    end
-end
-
-
-function overall_function(A::SparseMatrixCSC, X::Matrix, W_1::Matrix, W_2::Matrix)
-    ## A is the adjacency Matrix for the graph
-    ## X is the input n X m matrix 
-    ## W_1 is the matrix for the weights in the first GCN block 
-    ## W_2 is the matrix for the wieghts in the second GCN block 
-        output = LSM(gcn(A,Relu(gcn(A,X,W_1)),W_2))
-        output
-end
-    
-
-function nll_loss(Z_opt:: Matrix,Z:: Matrix)
-    ## Note that each row of the input Z should be in the form of log probabilities
-       return -sum((Z[Z_opt]))
-end
-
-function nll_loss_k(Z_opt:: Matrix, Z:: Matrix, k::Int64)
-   ## Note that each row of the input Z should be in the form of log probabilities
-    return -Z[k,:][Z_opt[k,:]]
-end
-    
-
-
-function scd_w1!(Z_opt, A::SparseMatrixCSC, X::Matrix{Float64}, W1::Matrix{Float64}, W2::Matrix{Float64},α::Float64)
-    ### stochastic coordinate descent for the output of kth node(z_k) to ith column of W1
-    Z = overall_function(A,X,W1,W2)
-    H2 = gcn(A,X,W1)
-    H3 = gcn(A,Relu(gcn(A,X,W1)),W2)
-
-    for i in 1:size(W1,2)
-        k = rand(1:size(Z,1))
-        output = zeros(size(H3,2),size(X,2))
-        for l in rowvals(A)[nzrange(A,k)]
-            output += Pmat(W2,A,k,l)*Diagonal(vec(gcn(A,X,W1)[l,:].>0))*Mmat(H2,X,A,l,i)
+    if layer == 1
+        W = first(Ws)
+        return W*sum(X[:,rowvals(A)[nzrange(A,idx)]]*Diagonal(1 ./sqrt.(d[idx]*d[rowvals(A)[nzrange(A,idx)]])), dims = 2)
+    else
+        Ws , W = Ws
+        temp = zeros(size(W,1))
+        activation = pop!(activations)
+        for j in rowvals(A)[nzrange(A,idx)]
+            temp += W * activation(gcn(A,X,j, layer - 1, activations, Ws))/sqrt(d[idx]*d[j])
+            
         end
-        J = Dmat(H3[k,:]) * output
-        if(iszero(J)) continue
-        end
-        W1[:,i] = W1[:,i]- α*(-Z_opt[k,:]'*J)'
-    end
-    W1
-end
+        return temp
 
-function scd_w2!(Z_opt, A::SparseMatrixCSC, X::Matrix{Float64}, W1::Matrix{Float64}, W2::Matrix{Float64}, α::Float64)
-    ### stochastic coordinate descent for the output of kth node(z_k) to ith column of W1
-    Z = overall_function(A,X,W1,W2)
-    H2 = gcn(A,X,W1)
-    H3 = gcn(A,Relu(gcn(A,X,W1)),W2)
-    
-    for i in 1:size(W2,2)
-        k = rand(1:size(Z,1))
-        output = zeros(size(H3,2),size(H2,2))
-        output = Dmat(H3[k,:])*Mmat(H3,H2,A,k,i)
-        W2[:,i] = W2[:,i]- α*(-Z_opt[k,:]'*output)'
     end
+end
+  
+function raw_gd_W2!(A::SparseMatrixCSC, X::Matrix, W1::Matrix{Float64}, W2::Matrix{Float64}, idx::Int64, z_opt::Vector{Bool} ,alpha::Float64)
+    d = sum(A, dims = 2)
+    m,~ = size(W1) 
+    k = size(W2,1)
+    temp = zeros(k*m)
+    m_i = lsm(gcn(A,X,idx,2, [ReLU], W1,W2))
+    for j in rowvals(A)[nzrange(A,idx)]
+        temp += 1/sqrt(d[idx]*d[j])* kron(gcn(A,X,j,1,~,W1),I(k))*(I(k)-exp.(m_i)*ones(k)')*(-z_opt)
+    end
+
+    W2[:] -= alpha*temp[:]
     W2
 end
 
+function raw_gd_W1!(A::SparseMatrixCSC, X::Matrix, W1::Matrix{Float64}, W2::Matrix{Float64}, idx::Int64, z_opt::Vector{Bool}, alpha::Float64)
+    d = sum(A, dims = 2)
+    m,p = size(W1)
+    k = size(W2,1)
+    temp = zeros(m*p)
+    m_i = lsm(gcn(A,X,idx,2,[ReLU],W1,W2))
+    dl = exp.(m_i)*ones(k)'
+    for j in rowvals(A)[nzrange(A,idx)]
+        temp2 = zeros(m*p,m)
+        for v in rowvals(A)[nzrange(A,j)]
+            temp2 += kron(X[:,v],I(m))/sqrt(d[j]*d[v])
+        end
+        temp += temp2*Diagonal(vec(gcn(A,X,idx,1,[],W1).>0))*W2'*dl*(-z_opt)/sqrt(d[idx]*d[j])
+    end
 
+    W1[:] -= alpha*temp[:]
+    W1
+end
+###### test
+n = 10
+p = 6
+m = 5
+k = 4
+idx = 1
+A = sprand(Bool,n,n,0.4)
+A = triu(A)
+A = A + A'
+A[diagind(A)] .= 1
+X = rand(p,n)
+W1 = rand(m,p)
+W2 = rand(k,m)
+z_opt = zeros(Bool,k)
+z_opt[k-1] = 1
+nll_loss(z_opt,lsm(gcn(A,X,idx,2,[ReLU],W1,W2)))
+
+
+#### Batched version -- not using matrices
+
+L1 = Dict{}
+L2 = Dict{}
 
